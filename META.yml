@@ -1,7 +1,7 @@
 --- #YAML:1.0
 name:               EBook-EPUB
-version:            0.1
-abstract:           module for generating EPUB documents
+version:            0.2
+abstract:           module for building OPF documents 
 author:
     - Oleksandr Tymoshenko <gonzo@bluezbox.com>
 license:            bsd
@@ -16,9 +16,11 @@ requires:
     File::Copy:    0
     File::Find:    0
     File::Temp:    0
-    Moose:         0
+    Moose:         0.90
     Test::More:    0
     XML::Writer:   0
+resources:
+    repository:  http://github.com/gonzoua/EBook-EPUB
 no_index:
     directory:
         - t
