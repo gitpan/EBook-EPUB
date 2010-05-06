@@ -1,7 +1,7 @@
 --- #YAML:1.0
 name:               EBook-EPUB
-version:            0.2
-abstract:           module for building OPF documents 
+version:            0.3
+abstract:           module for generating EPUB documents
 author:
     - Oleksandr Tymoshenko <gonzo@bluezbox.com>
 license:            bsd
