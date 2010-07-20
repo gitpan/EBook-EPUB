@@ -25,7 +25,7 @@
 package EBook::EPUB;
 
 use version;
-our $VERSION = 0.3;
+our $VERSION = 0.4;
 
 use Moose;
 
@@ -38,15 +38,16 @@ use EBook::EPUB::NCX;
 use EBook::EPUB::Container::Zip;
 
 use File::Temp qw/tempdir/;
+use File::Basename qw/dirname/;
 use File::Copy;
+use File::Path;
 use Carp;
 
 has metadata    => (
     isa     => 'Object', 
     is      => 'ro',
     default => sub { EBook::EPUB::Metadata->new() },
-    handles => [ qw/add_author
-                    add_contributor
+    handles => [ qw/add_contributor
                     add_creator
                     add_date
                     add_dcitem
@@ -147,6 +148,13 @@ sub to_xml
     $writer->end();
 
     return $xml;
+}
+
+sub add_author
+{
+    my ($self, $author, $formal) = @_;
+    $self->metadata->add_author($author, $formal);
+    $self->ncx->add_author($author);
 }
 
 sub add_title
@@ -307,7 +315,7 @@ sub copy_xhtml
 {
     my ($self, $src_filename, $filename, %opts) = @_;
     my $tmpdir = $self->tmpdir;
-    if (copy($src_filename, "$tmpdir/OPS/$filename")) {
+    if (mkdir_and_copy($src_filename, "$tmpdir/OPS/$filename")) {
         $self->add_xhtml_entry($filename, %opts);
     }
     else {
@@ -319,7 +327,7 @@ sub copy_stylesheet
 {
     my ($self, $src_filename, $filename) = @_;
     my $tmpdir = $self->tmpdir;
-    if (copy($src_filename, "$tmpdir/OPS/$filename")) {
+    if (mkdir_and_copy($src_filename, "$tmpdir/OPS/$filename")) {
         $self->add_stylesheet_entry("$filename");
     }
     else {
@@ -331,7 +339,7 @@ sub copy_image
 {
     my ($self, $src_filename, $filename, $type) = @_;
     my $tmpdir = $self->tmpdir;
-    if (copy($src_filename, "$tmpdir/OPS/$filename")) {
+    if (mkdir_and_copy($src_filename, "$tmpdir/OPS/$filename")) {
         $self->add_image_entry("$filename");
     }
     else {
@@ -343,7 +351,7 @@ sub copy_file
 {
     my ($self, $src_filename, $filename, $type) = @_;
     my $tmpdir = $self->tmpdir;
-    if (copy($src_filename, "$tmpdir/OPS/$filename")) {
+    if (mkdir_and_copy($src_filename, "$tmpdir/OPS/$filename")) {
         my $id = $self->nextid('id');
         $self->manifest->add_item(
             id          => $id,
@@ -471,6 +479,12 @@ sub adobe_encrypt
 
     close IN;
     close OUT;
+}
+
+sub mkdir_and_copy {
+    my ($from, $to) = @_;
+    mkpath(dirname($to));
+    return copy($from, $to);
 }
 
 no Moose;

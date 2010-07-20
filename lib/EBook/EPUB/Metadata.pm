@@ -32,6 +32,12 @@ has items => (
     default    => sub { [] },
 );
 
+has id_counter => (
+    is          => 'rw',
+    isa         => 'Int',
+    default     => 0,
+);
+
 sub encode
 {
     my ($self, $writer) = @_;
@@ -135,7 +141,14 @@ sub add_format
 sub add_identifier
 {
     my ($self, $ident, $scheme) = @_;
-    my @attr = ('id', 'BookId');
+    my $id = 'BookId';
+    # if it's urn:uuid - it should be BookId, otherwise include counter
+    if ($ident !~ /^urn:uuid/i) {
+        $id .= $self->id_counter;
+        $self->id_counter($self->id_counter + 1);
+    }
+
+    my @attr = ('id', $id);
     if (defined($scheme)) {
         push @attr, "opf:scheme", $scheme;
     }
@@ -251,7 +264,7 @@ Add description of the publication content
 =item add_identifier($ident, [$scheme])
 
 Add unique identifier of the publication. $scheme is an optional paramater to
-specify identification system of this particular identifier. e.g. ISDN, DOI
+specify identification system of this particular identifier. e.g. ISBN, DOI
 
 =item add_item($name, $value)
 
