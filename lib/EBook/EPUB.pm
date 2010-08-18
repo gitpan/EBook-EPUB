@@ -25,7 +25,7 @@
 package EBook::EPUB;
 
 use version;
-our $VERSION = 0.4;
+our $VERSION = 0.5;
 
 use Moose;
 
@@ -37,6 +37,7 @@ use EBook::EPUB::NCX;
 
 use EBook::EPUB::Container::Zip;
 
+use Data::UUID;
 use File::Temp qw/tempdir/;
 use File::Basename qw/dirname/;
 use File::Copy;
@@ -50,10 +51,10 @@ has metadata    => (
     handles => [ qw/add_contributor
                     add_creator
                     add_date
-                    add_dcitem
+                    add_meta_dcitem
                     add_description
                     add_format
-                    add_item
+                    add_meta_item
                     add_language
                     add_relation
                     add_rights
@@ -90,6 +91,11 @@ has ncx     => (
     handles => [ qw/add_navpoint/ ],
 );
 
+has _uuid  => (
+    isa     => 'Str',
+    is      => 'rw',
+);
+
 has _encryption_key  => (
     isa     => 'Str',
     is      => 'rw',
@@ -121,6 +127,11 @@ sub BUILD
 
     $self->spine->toc('ncx');
     mkdir ($self->tmpdir . "/OPS") or die "Can't make OPS dir in " . $self->tmpdir;
+    # Implicitly generate UUID for book
+    my $ug = new Data::UUID;
+    my $uuid = $ug->create_from_name_str(NameSpace_URL, "EBook::EPUB");
+    $self->_set_uuid($uuid);
+
 }
 
 sub to_xml
@@ -167,28 +178,39 @@ sub add_title
     $self->ncx->title($title);
 }
 
+sub _set_uuid
+{
+    my ($self, $uuid) = @_; 
+
+    # Just some naive check for key to be UUID
+    if ($uuid !~ /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i) {
+        carp "$uuid - is not valid UUID";
+        return;
+    }
+    my $key = $uuid;
+
+    $key =~ s/-//g;
+    $key =~ s/([a-f0-9]{2})/chr(hex($1))/egi;
+    $self->_encryption_key($key);
+    if (defined($self->_uuid)) {
+        warn "Overriding existing uuid " . $self->_uuid;
+        $self->_uuid($uuid);
+    }
+
+    $self->ncx->uid("urn:uuid:$uuid");
+    $self->metadata->set_book_id("urn:uuid:$uuid");
+    $self->_uuid($uuid);
+}
+
 sub add_identifier
 {
     my ($self, $ident, $scheme) = @_;
     if ($ident =~ /^urn:uuid:(.*)/i) {
-        my $key = $1;
-        # Just some naive check for key to be UUID
-        if ($key !~ /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i) {
-            carp "$key - is not valid UUID, skipping";
-            return;
-        }
-
-        $key =~ s/-//g;
-        $key =~ s/([a-f0-9]{2})/chr(hex($1))/egi;
-
-        if (!defined($self->_encryption_key)) {
-            $self->_encryption_key($key);
-        }
+        my $uuid = $1;
+        $self->_set_uuid($uuid);
     }
-    $self->metadata->add_identifier($ident, $scheme);
-    # Do our best guess, let it be the first UID
-    if (!defined($self->ncx->uid)) {
-        $self->ncx->uid($ident);
+    else {
+        $self->metadata->add_identifier($ident, $scheme);
     }
 }
 
@@ -212,6 +234,8 @@ sub add_xhtml_entry
         idref       => $id,
         linear      => $linear,
     );
+
+    return $id;
 }
 
 sub add_stylesheet_entry
@@ -223,6 +247,8 @@ sub add_stylesheet_entry
         href        => $filename,
         media_type  => 'text/css',
     );
+
+    return $id;
 }
 
 sub add_image_entry
@@ -267,6 +293,8 @@ sub add_entry
         href        => $filename,
         media_type  => $type,
     );
+
+    return $id;
 }
 
 sub add_xhtml
@@ -276,7 +304,8 @@ sub add_xhtml
     open F, ">:utf8", "$tmpdir/OPS/$filename";
     print F $data;
     close F;
-    $self->add_xhtml_entry($filename, %opts);
+
+    return $self->add_xhtml_entry($filename, %opts);
 }
 
 sub add_stylesheet
@@ -286,7 +315,8 @@ sub add_stylesheet
     open F, ">:utf8", "$tmpdir/OPS/$filename";
     print F $data;
     close F;
-    $self->add_stylesheet_entry($filename);
+
+    return $self->add_stylesheet_entry($filename);
 }
 
 sub add_image
@@ -297,7 +327,8 @@ sub add_image
     binmode F;
     print F $data;
     close F;
-    $self->add_image_entry($filename, $type);
+
+    return $self->add_image_entry($filename, $type);
 }
 
 sub add_data
@@ -308,7 +339,8 @@ sub add_data
     binmode F;
     print F $data;
     close F;
-    $self->add_entry($filename, $type);
+
+    return $self->add_entry($filename, $type);
 }
 
 sub copy_xhtml
@@ -316,11 +348,13 @@ sub copy_xhtml
     my ($self, $src_filename, $filename, %opts) = @_;
     my $tmpdir = $self->tmpdir;
     if (mkdir_and_copy($src_filename, "$tmpdir/OPS/$filename")) {
-        $self->add_xhtml_entry($filename, %opts);
+        return $self->add_xhtml_entry($filename, %opts);
     }
     else {
         carp ("Failed to copy $src_filename to $tmpdir/OPS/$filename");
     }
+
+    return;
 }
 
 sub copy_stylesheet
@@ -328,11 +362,13 @@ sub copy_stylesheet
     my ($self, $src_filename, $filename) = @_;
     my $tmpdir = $self->tmpdir;
     if (mkdir_and_copy($src_filename, "$tmpdir/OPS/$filename")) {
-        $self->add_stylesheet_entry("$filename");
+        return $self->add_stylesheet_entry("$filename");
     }
     else {
         carp ("Failed to copy $src_filename to $tmpdir/OPS/$filename");
     }
+
+    return;
 }
 
 sub copy_image
@@ -340,11 +376,13 @@ sub copy_image
     my ($self, $src_filename, $filename, $type) = @_;
     my $tmpdir = $self->tmpdir;
     if (mkdir_and_copy($src_filename, "$tmpdir/OPS/$filename")) {
-        $self->add_image_entry("$filename");
+        return $self->add_image_entry("$filename");
     }
     else {
         carp ("Failed to copy $src_filename to $tmpdir/OPS/$filename");
     }
+
+    return;
 }
 
 sub copy_file
@@ -358,10 +396,13 @@ sub copy_file
             href        => "$filename",
             media_type  => $type,
         );
+        return $id;
     }
     else {
         carp ("Failed to copy $src_filename to $tmpdir/OPS/$filename");
     }
+
+    return;
 }
 
 sub encrypt_file
@@ -381,10 +422,13 @@ sub encrypt_file
             media_type  => $type,
         );
         $self->add_encrypted_fileref("OPS/$filename");
+        return $id;
     }
     else {
         carp ("Failed to copy $src_filename to $tmpdir/OPS/$filename");
     }
+
+    return;
 }
 
 
@@ -499,13 +543,12 @@ EBook::EPUB - module for generating EPUB documents
 
 =head1 VERSION
 
-Version 0.3
+Version 0.5
 
 
 =head1 SYNOPSIS
 
     use EBook::EPUB;
-    use Data::UUID;
 
     # Create EPUB object
     my $epub = EBook::EPUB->new;
@@ -514,21 +557,32 @@ Version 0.3
     $epub->add_title('Three Men in a Boat');
     $epub->add_author('Jerome K. Jerome');
     $epub->add_language('en');
-    # Generate UUID. It's required for embedding fonts
-    my $ug = new Data::UUID;
-    my $uuid = $ug->create_from_name_str(NameSpace_URL, "fb2epub.com");
-    $epub->add_identifier("urn:uuid:$uuid");
+    $epub->add_identifier('1440465908', 'ISBN');
 
-    # Add package content: stylesheet, font, xhtml
+    # Add package content: stylesheet, font, xhtml and cover
     $epub->copy_stylesheet('/path/to/style.css', 'style.css');
     $epub->copy_file('/path/to/figure1.png', 
         'figure1.png', 'image/png');
     $epub->encrypt_file('/path/to/CharisSILB.ttf', 
         'CharisSILB.ttf', 'application/x-font-ttf');
-    $epub->copy_xhtml('/path/to/page1.xhtml', 'page1.xhtml');
+    my $chapter_id = $epub->copy_xhtml('/path/to/page1.xhtml', 
+        'page1.xhtml');
     $epub->copy_xhtml('/path/to/notes.xhtml', 'notes.xhtml',
         linear => 'no'
     );
+
+    # Add top-level nav-point
+    my $navpoint = $epub->add_navpoint(
+            label       => "Chapter 1",
+            id          => $chapter_id,
+            content     => 'page1.xhtml',
+            play_order  => 1 # should always start with 1
+    );
+
+    # Add cover image
+    # Not actual epub standart but does the trick for iBooks
+    my $cover_id = $epub->copy_image('/path/to/cover.jpg', 'cover.jpg');
+    $epub->add_meta_item('cover', $cover_id);
 
     # Generate resulting ebook
     $epub->pack_zip('/path/to/three_men_in_a_boat.epub');
@@ -626,9 +680,13 @@ an anonymous hash, for possible key values see L<EBook::EPUB::NCX::NavPoint>.
 Method returns created EBook::EPUB::NCX::NavPoint object that could be used
 later for adding subsections.
 
+=item add_meta_item($name, $value)
+
+Add non-standard item to metadata e.g. metadata from source documetn that is not described in Doublin Core spec.
+
 =item add_xhtml($filename, $data, %opts)
 
-Add xhtml data $data to $filename in package. 
+Add xhtml data $data to $filename in package. Returns id of newly added entry.
 
 %opts is an anonymous hash array of parameters:
 
@@ -642,15 +700,15 @@ Add xhtml data $data to $filename in package.
 
 =item add_stylesheet($filename, $data)
 
-Add stylesheet data $data as $filename in package
+Add stylesheet data $data as $filename in package. Returns id of newly added entry.
 
 =item add_image($filename, $data, $type)
 
-Add image data $data as $filename in package with content type $type (e.g. image/jpeg)
+Add image data $data as $filename in package with content type $type (e.g. image/jpeg). Returns id of newly added entry.
 
 =item copy_xhtml($source_file, $filename, %opts)
 
-Add existing xhtml file $source_file as $filename in package. 
+Add existing xhtml file $source_file as $filename in package. Returns id of newly added entry.
 
 %opts is an anonymous hash array of parameters:
 
@@ -664,20 +722,19 @@ Add existing xhtml file $source_file as $filename in package.
 
 =item copy_stylesheet($source_file, $filename)
 
-Add existing css file $source_file as $filename in package
+Add existing css file $source_file as $filename in package. Returns id of newly added entry.
 
 =item copy_image($source_file, $filename, $type)
 
-Add existing image file $source_file as $filename in package and set its content type to $type (e.g. image/jpeg)
+Add existing image file $source_file as $filename in package and set its content type to $type (e.g. image/jpeg). Returns id of newly added entry.
 
 =item copy_file($source_file, $filename, $type)
 
-Add existing file $source_file as $filename in package and set its content type to $type (e.g. text/plain)
+Add existing file $source_file as $filename in package and set its content type to $type (e.g. text/plain). Returns id of newly created entry. Returns id of newly added entry.
 
 =item encrypt_file($source_file, $filename, $type)
 
-Add existing file $source_file as $filename in package and set its content type to $type (e.g. text/plain) Apply Adobe copy protection scheme to this file using book UUID as a key. Function croaks if key has not been set previously using 
-
+Add existing file $source_file as $filename in package and set its content type to $type (e.g. text/plain) Apply Adobe copy protection scheme to this file using book UUID as a key. Function croaks if key has not been set previously using. Returns id of newly added entry.
 
 =item pack_zip($filename)
 
