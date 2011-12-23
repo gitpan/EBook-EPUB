@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               EBook-EPUB
-version:            0.5
+version:            0.6
 abstract:           module for generating EPUB documents
 author:
     - Oleksandr Tymoshenko <gonzo@bluezbox.com>
